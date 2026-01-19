@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Multilingual Space Invaders</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 10px;
+      background: #f5f5f5;
+      font-family: 'Segoe UI', sans-serif;
+      text-align: center;
+    }
+
+    #gameContainer {
+      background-color: white;
+      border: 3px solid #555;
+      border-radius: 10px;
+      padding: 15px;
+      display: inline-block;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+    }
+
+    canvas {
+      background: #111;
+      border: 3px solid #333;
+      border-radius: 6px;
+      display: block;
+      margin: 0 auto 10px auto;
+    }
+
+    .topBar {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 10px;
+    }
+
+    .topBar div, .topBar select, .topBar button {
+      font-size: 14px;
+    }
+
+    #languageSelector {
+      padding: 4px 6px;
+    }
+
+    #resetButton, #soundToggle {
+      padding: 6px 12px;
+      background-color: #007bff;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    #resetButton:hover, #soundToggle:hover {
+      background-color: #0056b3;
+    }
+
+    #gameOver {
+      color: red;
+      font-size: 24px;
+      font-weight: bold;
+      display: none;
+      margin-top: 10px;
+    }
+
+    #livesDisplay {
+      font-size: 16px;
+      color: crimson;
+    }
+
+    @media (max-width: 600px) {
+      .topBar {
+        flex-direction: column;
+      }
+    }
+  </style>
+</head>
+<body>
+  <h2>🌍 Multilingual Space Invaders</h2>
+  <div id="gameContainer">
+    <div class="topBar">
+      <div id="levelDisplay">Level: 1</div>
+      <div id="pointsDisplay">Points: 0</div>
+      <select id="languageSelector">
+        <option value="en">English</option>
+        <option value="es">Spanish</option>
+        <option value="ru">Russian</option>
+        <option value="hi">Hindi</option>
+        <option value="zh">Chinese</option>
+      </select>
+      <button id="resetButton">Reset</button>
+      <button id="soundToggle">🔊 Sound On</button>
+      <div id="livesDisplay">❤️❤️❤️</div>
+    </div>
+    <canvas id="gameCanvas" width="480" height="360"></canvas>
+    <div id="gameOver">Game Over</div>
+  </div>
+  <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const gameOverText = document.getElementById('gameOver');
+    const levelDisplay = document.getElementById('levelDisplay');
+    const pointsDisplay = document.getElementById('pointsDisplay');
+    const languageSelector = document.getElementById('languageSelector');
+    const resetButton = document.getElementById('resetButton');
+    const soundToggle = document.getElementById('soundToggle');
+    const livesDisplay = document.getElementById('livesDisplay');
+    let gameOver = false;
+    let level = 1;
+    let points = 0;
+    const maxLevel = 15;
+    let alienSpeedX = 1.5;
+    let alienSpeedY = 0;
+    let pointsPerLetter = 10;
+    let currentLanguage = 'en';
+    let lives = 3;
+    let soundOn = true;
+    let synth = window.speechSynthesis;
+    let currentUtterance = null;
+
+    const spaceship = {
+      x: canvas.width / 2 - 15,
+      y: canvas.height - 30,
+      width: 30,
+      height: 20,
+      speed: 4,
+      color: 'white',
+      bullets: [],
+      canShoot: true
+    };
+
+    const alienRows = 6;
+    const alienCols = 10;
+    const alienWidth = 24;
+    const alienHeight = 20;
+    const alienPadding = 6;
+    const alienOffsetTop = 30;
+    const alienOffsetLeft = 30;
+    let aliens = [];
+    let alienBullets = [];
+
+    const levelColors = ['green', 'blue', 'purple', 'orange', 'yellow', 'cyan'];
+    const alphabets = {
+      en: "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split(""),
+      es: "ABCDEFGHIJKLMNÑOPQRSTUVWXYZ".split(""),
+      ru: "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ".split(""),
+      hi: "अआइईउऊऋएऐओऔकखगघङचछजझञटठडढणतथदधनपफबभमयरलवशषसह".split(""),
+      zh: "你好世界中文汉字拼音".split("")
+    };
+
+    const keys = { left: false, right: false, space: false };
+
+    resetButton.addEventListener('click', resetGame);
+    soundToggle.addEventListener('click', () => {
+      soundOn = !soundOn;
+      soundToggle.textContent = soundOn ? "🔊 Sound On" : "🔇 Sound Off";
+    });
+
+    languageSelector.addEventListener('change', e => {
+      currentLanguage = e.target.value;
+      createAliens();
+    });
+
+    function updateLivesDisplay() {
+      livesDisplay.textContent = "❤️".repeat(lives);
+    }
+
+    function resetGame() {
+      level = 1;
+      points = 0;
+      lives = 3;
+      pointsPerLetter = 10;
+      alienSpeedX = 1.5;
+      gameOver = false;
+      gameOverText.style.display = 'none';
+      pointsDisplay.textContent = `Points: ${points}`;
+      levelDisplay.textContent = `Level: ${level}`;
+      spaceship.bullets = [];
+      alienBullets = [];
+      updateLivesDisplay();
+      createAliens();
+	  gameLoop(); // <-- this line ensures the game restarts
+    }
+
+    function createAliens() {
+      aliens = [];
+      const alphabet = alphabets[currentLanguage];
+      const aggressionRate = Math.min(level * 0.1, 1); // 10% per level, max 100%
+      for (let row = 0; row < alienRows; row++) {
+        for (let col = 0; col < alienCols; col++) {
+          const letter = alphabet[Math.floor(Math.random() * alphabet.length)];
+          const isAggressive = Math.random() < aggressionRate;
+          aliens.push({
+            x: col * (alienWidth + alienPadding) + alienOffsetLeft,
+            y: row * (alienHeight + alienPadding) + alienOffsetTop,
+            width: alienWidth,
+            height: alienHeight,
+            letter: letter,
+            alive: true,
+            aggressive: isAggressive,
+            color: isAggressive ? 'red' : levelColors[level % levelColors.length]
+          });
+        }
+      }
+    }
+
+    document.addEventListener('keydown', e => {
+      if (e.key === 'ArrowLeft') keys.left = true;
+      if (e.key === 'ArrowRight') keys.right = true;
+      if (e.key === ' ') keys.space = true;
+    });
+
+    document.addEventListener('keyup', e => {
+      if (e.key === 'ArrowLeft') keys.left = false;
+      if (e.key === 'ArrowRight') keys.right = false;
+      if (e.key === ' ') keys.space = false;
+    });
+    function drawSpaceship() {
+      ctx.fillStyle = spaceship.color;
+      ctx.fillRect(spaceship.x, spaceship.y, spaceship.width, spaceship.height);
+    }
+
+    function moveSpaceship() {
+      if (keys.left && spaceship.x > 0) spaceship.x -= spaceship.speed;
+      if (keys.right && spaceship.x + spaceship.width < canvas.width) spaceship.x += spaceship.speed;
+    }
+
+    function shootBullet() {
+      if (keys.space && spaceship.canShoot) {
+        spaceship.bullets.push({
+          x: spaceship.x + spaceship.width / 2 - 2,
+          y: spaceship.y,
+          width: 4,
+          height: 8,
+          color: 'lime'
+        });
+        spaceship.canShoot = false;
+        setTimeout(() => spaceship.canShoot = true, 300);
+      }
+    }
+
+    function drawBullets() {
+      spaceship.bullets.forEach((b, i) => {
+        b.y -= 5;
+        ctx.fillStyle = b.color;
+        ctx.fillRect(b.x, b.y, b.width, b.height);
+        if (b.y + b.height < 0) spaceship.bullets.splice(i, 1);
+      });
+    }
+
+    function drawAlienBullets() {
+      alienBullets.forEach((b, i) => {
+        b.y += 3;
+        ctx.fillStyle = 'orange';
+        ctx.fillRect(b.x, b.y, b.width, b.height);
+        if (b.y > canvas.height) alienBullets.splice(i, 1);
+      });
+    }
+
+    function fireFromAliens() {
+      aliens.forEach(alien => {
+        if (alien.alive && alien.aggressive && Math.random() < 0.002 * level) {
+          alienBullets.push({
+            x: alien.x + alien.width / 2 - 2,
+            y: alien.y + alien.height,
+            width: 4,
+            height: 8
+          });
+        }
+      });
+    }
+
+    function drawAliens() {
+      aliens.forEach(a => {
+        if (a.alive) {
+          ctx.fillStyle = a.color;
+          ctx.font = '16px Arial';
+          ctx.fillText(a.letter, a.x + 4, a.y + a.height - 4);
+        }
+      });
+    }
+
+    function moveAliens() {
+      let hitEdge = false;
+      aliens.forEach(a => {
+        if (a.alive) {
+          a.x += alienSpeedX;
+          if (a.x + a.width > canvas.width || a.x < 0) hitEdge = true;
+        }
+      });
+
+      if (hitEdge) {
+        alienSpeedX = -alienSpeedX;
+        alienSpeedY = 12;
+      }
+
+      aliens.forEach(a => {
+        a.y += alienSpeedY;
+        if (a.alive && a.y + a.height >= spaceship.y) {
+          loseLife();
+        }
+      });
+
+      alienSpeedY = 0;
+    }
+
+    function playLetterSound(letter) {
+      if (!soundOn) return;
+      if (currentUtterance) synth.cancel();
+      currentUtterance = new SpeechSynthesisUtterance(letter);
+      currentUtterance.lang = currentLanguage;
+      synth.speak(currentUtterance);
+    }
+
+    function detectCollisions() {
+      // Bullets hit aliens
+      spaceship.bullets.forEach((bullet, bi) => {
+        aliens.forEach((alien, ai) => {
+          if (alien.alive &&
+              bullet.x < alien.x + alien.width &&
+              bullet.x + bullet.width > alien.x &&
+              bullet.y < alien.y + alien.height &&
+              bullet.y + bullet.height > alien.y) {
+            alien.alive = false;
+            spaceship.bullets.splice(bi, 1);
+            playLetterSound(alien.letter);
+            points += pointsPerLetter;
+            pointsDisplay.textContent = `Points: ${points}`;
+          }
+        });
+      });
+
+      // Alien bullets hit player
+      alienBullets.forEach((bullet, i) => {
+        if (bullet.x < spaceship.x + spaceship.width &&
+            bullet.x + bullet.width > spaceship.x &&
+            bullet.y < spaceship.y + spaceship.height &&
+            bullet.y + bullet.height > spaceship.y) {
+          alienBullets.splice(i, 1);
+          loseLife();
+        }
+      });
+
+      const allDead = aliens.every(a => !a.alive);
+      if (allDead) levelUp();
+    }
+
+    function loseLife() {
+      lives--;
+      updateLivesDisplay();
+      if (lives <= 0) gameOver = true;
+    }
+
+    function levelUp() {
+      level++;
+      if (level > maxLevel) level = maxLevel;
+      pointsPerLetter += 5;
+      levelDisplay.textContent = `Level: ${level}`;
+      alienSpeedX += 0.4;
+      createAliens();
+    }
+
+    function endGame() {
+      gameOverText.style.display = 'block';
+      cancelAnimationFrame(gameLoopId);
+    }
+
+    let gameLoopId;
+    function gameLoop() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawSpaceship();
+      moveSpaceship();
+      shootBullet();
+      drawBullets();
+      drawAlienBullets();
+      drawAliens();
+      moveAliens();
+      fireFromAliens();
+      detectCollisions();
+
+      if (!gameOver) {
+        gameLoopId = requestAnimationFrame(gameLoop);
+      } else {
+        endGame();
+      }
+    }
+
+    resetGame();
+    gameLoop();
+  </script>
+</body>
+</html>
